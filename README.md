@@ -60,14 +60,14 @@ later and Rust toolchains for the two builds. Verified on darwin-arm64.
 
 One config override drives three passes:
 
-```jsonc
-// .oxlintrc.json
-"overrides": [
+```ts
+// oxlint.config.mts
+overrides: [
   {
-    "files": ["**/*.{gjs,gts}"],
-    "languageOptions": { "parser": "ember-eslint-parser" }
-  }
-]
+    files: ['**/*.{gjs,gts}'],
+    languageOptions: { parser: 'ember-eslint-parser' },
+  },
+],
 ```
 
 1. JS-plugin pass. `ember-eslint-parser` parses the file, and bridged ESLint-plugin rules
@@ -87,19 +87,21 @@ executes, so TypeScript keeps the underlying option command-line-only and off by
 because a checked-in config must not be able to grant a repo the right to run its own code.
 Hence `--run-external-code`, which a `languageOptions.parser` override deliberately does
 not imply. It is the one thing the lint scripts pass on the command line; everything else,
-`typeAware` included, lives in `.oxlintrc.json` where an editor can read it too.
+`typeAware` included, lives in `oxlint.config.mts` where an editor can read it too.
 
 ## What it reports
 
-`pnpm lint:oxlint` is expected to fail: the findings are the demo. Each one is marked
-`DELIBERATE` in the source.
+`pnpm lint:oxlint` is expected to fail: the findings are the demo. The first four are marked
+`DELIBERATE` in the source. The last is ESLint's own finding on the same code, reported
+because the config ports ESLint's rules (see [the comparison](#setup-relative-to-a-stock-blueprint)).
 
 | file                                | finding                                                                         | which pass |
 | ----------------------------------- | ------------------------------------------------------------------------------- | ---------- |
 | `app/components/counter.gts:30`     | `typescript(no-unnecessary-condition)` on `this.isEnabled`, inside `<template>` | type-aware |
 | `app/components/save-button.gts:15` | `typescript(no-floating-promises)` in the script half                           | type-aware |
 | `app/components/fixable.gts:8`      | `typescript(no-unnecessary-type-assertion)`, auto-fixable                       | type-aware |
-| `app/components/banner.gts:8`       | `ember(template-no-let-reference)` on `{{message}}`                             | JS plugin  |
+| `app/components/banner.gts:12`      | `ember(template-no-let-reference)` on `{{message}}`                             | JS plugin  |
+| `app/components/save-button.gts:15` | `warp-drive(no-legacy-request-patterns)` on `this.args.save()`                  | JS plugin  |
 
 The negative case:
 
@@ -123,11 +125,11 @@ now-redundant parens; `pnpm format` cleans them up.)
 
 ## Telling a mapper problem from a rule problem
 
-Drop the `.gts` override and the file stops being eligible at all, so you get silence
-instead of a misleading diagnostic:
+Drop the `languageOptions.parser` override and the file stops being eligible at all, so you
+get silence instead of a misleading diagnostic:
 
 ```
-$ bin/oxlint -c without-the-override.json app/components/counter.gts
+$ bin/oxlint -c without-the-override.mts --run-external-code app/components/counter.gts
 No files found to lint. Please check your paths and ignore patterns.
 ```
 
@@ -190,11 +192,17 @@ always-truthy check in three places:
 | the script half of a `.gts` | reports                    | reports |
 | inside `<template>`         | silent                     | reports |
 
-Same rule, both sides. ESLint does catch three of the four findings above
-(`template-no-let-reference`, `no-unnecessary-type-assertion`, `no-floating-promises`), and
-adds `prefer-const` and a `warp-drive` rule this oxlint config does not cover, since
-`correctness` is the only category enabled and `eslint-plugin-warp-drive` is not in
-`jsPlugins`. The one it cannot reach is the one inside the template.
+Same rule, both sides. Everything else ESLint reports here, oxlint reports too, because
+`oxlint.config.mts` builds its rules from the presets `eslint.config.mjs` uses, block for
+block. Plugins oxlint does not implement natively (ember, warp-drive, qunit, n) run bridged
+through `jsPlugins`. Per file type, every rule ESLint enables is enabled in oxlint except
+three: `no-dupe-args` and `no-octal`, which strict mode turns into syntax errors the parser
+reports, and `ember/require-return-from-computed` in `.gjs`/`.gts` (see below). On top of
+that, oxlint adds its `correctness` category and `no-unnecessary-condition`, and the
+template finding is the one ESLint cannot reach.
+
+The config is `.mts` rather than `.ts` because `package.json` has no `"type": "module"`,
+and without it Node warns on every run.
 
 There is no CI here: `pnpm lint` cannot run anywhere the two binaries have not been built by
 hand.
