@@ -26,8 +26,8 @@
     "lint:hbs:fix": "ember-template-lint . --fix",
     "lint:js": "eslint . --cache",
     "lint:js:fix": "eslint . --fix",
-    "lint:oxlint": "./bin/oxlint --type-aware --run-external-code .",
-    "lint:oxlint:fix": "./bin/oxlint --type-aware --run-external-code --fix .",
+    "lint:oxlint": "./bin/oxlint --run-external-code .",
+    "lint:oxlint:fix": "./bin/oxlint --run-external-code --fix .",
     "lint:types": "node ./node_modules/typescript-7/bin/tsc --noEmit --runExternalCode",
     "start": "vite",
     "test": "vite build --mode development && ember test --path dist"

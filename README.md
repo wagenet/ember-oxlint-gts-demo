@@ -65,7 +65,8 @@ Eligibility and permission are separate. Content mappers are project code that t
 executes, so TypeScript keeps the underlying option command-line-only and off by default,
 because a checked-in config must not be able to grant a repo the right to run its own code.
 Hence `--run-external-code`, which a `languageOptions.parser` override deliberately does
-not imply.
+not imply. It is the one thing the lint scripts pass on the command line; everything else,
+`typeAware` included, lives in `.oxlintrc.json` where an editor can read it too.
 
 ## What it reports
 
@@ -84,10 +85,6 @@ The negative case:
 | file                          | what must not happen                                                                                                                                                                      |
 | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `app/components/greeting.gts` | `formatName` is imported and used only inside `<template>`. `eslint/no-unused-vars` is on and correctly stays quiet. Add an import that really is unused and it reports that one instead. |
-
-`--type-aware` is redundant here. `options.typeAware` in the config already turns it on, so
-a bare `bin/oxlint .` reports the same four. Both are kept: the config value is what an
-editor reads, the flag is what makes the script self-describing.
 
 ### Fixes stop at the template boundary
 
