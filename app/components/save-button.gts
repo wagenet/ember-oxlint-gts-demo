@@ -9,8 +9,8 @@ export interface SaveButtonSignature {
 }
 
 export default class SaveButton extends Component<SaveButtonSignature> {
-  // DELIBERATE: the promise is never awaited or caught -- `no-floating-promises`,
-  // a type-aware finding in the script half of the same file.
+  // DELIBERATE: the promise is never awaited or caught, so `no-floating-promises`
+  // reports here. A type-aware finding in the script half of the same file.
   handleClick = () => {
     this.args.save();
   };

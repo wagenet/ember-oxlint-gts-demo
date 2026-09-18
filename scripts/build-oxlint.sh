@@ -4,7 +4,7 @@
 # Type-aware linting of .gts/.gjs needs two changes that are not released:
 #   oxlint    routes files it only knows through a languageOptions.parser override
 #             to tsgolint, instead of skipping them   (oxc-project/oxc#26236)
-#   tsgolint  honours the tsconfig's contentMappers   (oxc-project/tsgolint#1166)
+#   tsgolint  honors the tsconfig's contentMappers   (oxc-project/tsgolint#1166)
 #
 # Point OXC_DIR and TSGOLINT_DIR at checkouts of those branches.
 set -euo pipefail

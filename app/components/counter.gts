@@ -18,7 +18,7 @@ export default class Counter extends Component<CounterSignature> {
   @tracked count = this.args.start ?? 0;
 
   // DELIBERATE: typed `true`, so the `{{#if}}` guarding it below can never be false.
-  // This is the type-aware finding that has to land inside `<template>`.
+  // The type-aware finding that has to land inside `<template>`.
   readonly isEnabled = true;
 
   increment = () => {
