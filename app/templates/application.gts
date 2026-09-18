@@ -10,8 +10,13 @@ import { Avatar, Banner, Counter, Greeting } from '../components/index.ts';
     <Greeting @first="Ada" @last="Lovelace" />
     <Avatar @alt="Ada Lovelace" @src="/robots.txt" />
 
-    <Counter @start={{1}} @step={{2}} as |count|>
-      <p>count is {{count}}</p>
+    <Counter @start={{1}} @step={{2}}>
+      <:default as |count|>
+        <p>count is {{count}}</p>
+      </:default>
+      <:actions>
+        <button type="button">reset</button>
+      </:actions>
     </Counter>
   </main>
 

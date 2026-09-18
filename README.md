@@ -19,6 +19,9 @@ Two changes, each on a branch:
 | oxlint   | route files it only knows through a `languageOptions.parser` override to tsgolint, instead of skipping them | [oxc#26236](https://github.com/oxc-project/oxc/pull/26236)         |
 | tsgolint | honor the tsconfig's `contentMappers`, which is how TypeScript 7 hands `.gts` to Glint                      | [tsgolint#1166](https://github.com/oxc-project/tsgolint/pull/1166) |
 
+oxc#26236 builds on [oxc#24262](https://github.com/oxc-project/oxc/pull/24262), which added
+custom JS parser support, so an oxc checkout needs both.
+
 There is nothing to `npm install`. Build both from checkouts:
 
 ```sh
@@ -27,13 +30,13 @@ pnpm install
 pnpm lint:oxlint
 ```
 
-`scripts/build-oxlint.sh` stages the pair into `.oxlint-internal/` (gitignored, ~35MB) and
-writes a `BUILD-INFO` recording which commits went in. `bin/oxlint` is a three-line wrapper
-that sets `OXLINT_TSGOLINT_PATH` and runs the staged CLI. Everything after it is ordinary
-oxlint. Set `OXLINT_INTERNAL_DIR` to reuse a build staged somewhere else.
+`scripts/build-oxlint.sh` stages the pair into `.oxlint-internal/` (gitignored, ~36MB) and
+writes a `BUILD-INFO` recording which commits went in. `bin/oxlint` sets `OXLINT_TSGOLINT_PATH` and
+runs the staged CLI, and does nothing else. Everything after it is ordinary oxlint. Set `OXLINT_INTERNAL_DIR` to reuse a build staged somewhere else.
 
-Requirements: Node >= 22.21.1 (`ember-content-mapper` spawns a bare `node`), plus Go and
-Rust toolchains for the two builds. Verified on darwin-arm64.
+Requirements: Node matching `^22.21.1 || >=24.10.0`, which is `ember-content-mapper`'s own
+range and applies because it spawns a bare `node` (23.x does not qualify). Plus Go and Rust
+toolchains for the two builds. Verified on darwin-arm64.
 
 ## How a `.gts` file gets linted
 
@@ -148,33 +151,55 @@ declared directly rather than leaned on transitively), `@glint/ember-tsc` pinned
 "typescript-7": "npm:typescript@7.1.0-dev.20260901.1"    // reads contentMappers
 ```
 
-`lint:types` runs the TypeScript 7 copy as `tsc --noEmit --runExternalCode`. oxlint needs
-neither copy: tsgolint has typescript-go compiled in.
+`lint:types` runs the TypeScript 7 copy as `tsc --noEmit --runExternalCode`. Both copies are
+load-bearing. tsgolint has typescript-go compiled in and does the checking, but the mapper
+runs Glint in Node, and `@glint/ember-tsc` peer-depends on `typescript >=5.6.0`, so the
+type-aware pass needs the TypeScript 6 copy installed as well.
 
-`.gts` and `.gjs` imports need explicit extensions (`./counter.gts`, not
-`ember-oxlint-gts-demo/components/counter`). The `paths` alias resolves `.ts` but not
-`.gts`, and you get `TS2307 Cannot find module` if you forget.
+`.gts` and `.gjs` imports need an explicit extension, or you get `TS2307 Cannot find
+module`. The extension is the part that matters, not the style of specifier:
+`ember-oxlint-gts-demo/components/counter.gts` resolves through the `paths` alias just as
+`./counter.gts` does, while `./counter` fails.
 
-The blueprint's ESLint, Prettier, stylelint and template-lint are all left in place. ESLint
-finds the same two findings oxlint does in `banner.gts` and `save-button.gts`, plus
-`prefer-const` and a `warp-drive` rule this oxlint config does not cover: `correctness` is
-the only category enabled, and `eslint-plugin-warp-drive` is not in `jsPlugins`.
+The blueprint's ESLint, Prettier, stylelint and template-lint are all left in place, which
+makes the gap measurable. `@typescript-eslint/no-unnecessary-condition` is not in the
+blueprint's `recommendedTypeChecked` set; enable it on the ESLint side and put the same
+always-truthy check in three places:
 
-The generated GitHub Actions workflow was removed, since `pnpm lint` cannot run anywhere
-the two binaries have not been built by hand.
+| site                        | ESLint + typescript-eslint | oxlint  |
+| --------------------------- | -------------------------- | ------- |
+| a `.ts` file                | reports                    | reports |
+| the script half of a `.gts` | reports                    | reports |
+| inside `<template>`         | silent                     | reports |
+
+Same rule, both sides. ESLint does catch three of the four findings above
+(`template-no-let-reference`, `no-unnecessary-type-assertion`, `no-floating-promises`), and
+adds `prefer-const` and a `warp-drive` rule this oxlint config does not cover, since
+`correctness` is the only category enabled and `eslint-plugin-warp-drive` is not in
+`jsPlugins`. The one it cannot reach is the one inside the template.
+
+There is no CI here: `pnpm lint` cannot run anywhere the two binaries have not been built by
+hand.
 
 ## Editor
 
-The stock oxc VS Code extension can do this, with one caveat. `--run-external-code` has no
-config equivalent by design, and the language server takes the permission from the client,
-so type-aware `.gts` in an editor needs a build that defaults it on. That is a local patch,
-absent from the PR branches.
+Not reachable yet. `--run-external-code` has no config equivalent by design, and the
+language server takes the permission from the client rather than from a file in the
+repository, so an editor needs a client that can send it.
+[oxc-vscode#374](https://github.com/oxc-project/oxc-vscode/pull/374) adds that as an
+`oxc.runExternalCode` setting, gated on VS Code workspace trust: the value is ignored when
+it comes from a checked-in `.vscode/settings.json` in a workspace you have not trusted. That
+PR is draft and waits on the oxlint server side, so for now a `.gts` opened in an editor
+reports `unsupported-file-extension`.
+
+When it lands, these are the paths to point at a local build:
 
 ```jsonc
 {
   "oxc.path.oxlint": "${workspaceFolder}/.oxlint-internal/oxlint/bin/oxlint",
   "oxc.path.tsgolint": "${workspaceFolder}/.oxlint-internal/bin/tsgolint",
   "oxc.typeAware": true,
+  "oxc.runExternalCode": true,
 }
 ```
 
@@ -202,10 +227,19 @@ absent from the PR branches.
 
 - Bridged rules needing type information. The bridge supplies no parser services, and
   tsgolint does not run bridged rules, so there is nowhere for a type-checked ESLint rule to
-  work.
+  work. Not tested in this repo.
 - Diagnostics whose fix cannot be expressed in the template. `typescript/dot-notation` is
-  the clearest case: a named block `<:actions>` becomes `blocks["actions"]` in the mapped
-  TypeScript, and `.actions` is not something you can write in a template. Not enabled here.
+  the clearest case. Blocks are property accesses in the mapped TypeScript, so enabling the
+  rule reports against the component's caller:
+
+  ```
+  app/templates/application.gts:14:9: error typescript(dot-notation): ["default"] is better written in dot notation.
+  app/templates/application.gts:17:9: error typescript(dot-notation): ["actions"] is better written in dot notation.
+  ```
+
+  Neither `.default` nor `.actions` is something you can write in a template, so the fix has
+  nowhere to go. Not enabled here.
+
 - Linux and CI. Only built and run on darwin-arm64.
 
 ## Prior art
