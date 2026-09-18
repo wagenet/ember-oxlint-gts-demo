@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# Run the locally built oxlint with its matching tsgolint wired in.
+#
+# Neither is released yet, so there is nothing to install — see README.md and run
+# scripts/build-oxlint.sh first. Set OXLINT_INTERNAL_DIR to reuse a build staged
+# somewhere else.
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+staged="${OXLINT_INTERNAL_DIR:-$repo_root/.oxlint-internal}"
+
+[ -f "$staged/oxlint/dist/cli.js" ] || {
+  echo "no oxlint staged in $staged — run scripts/build-oxlint.sh (see README.md)" >&2
+  exit 1
+}
+
+# How oxlint finds tsgolint. Without it, --type-aware silently reports nothing.
+export OXLINT_TSGOLINT_PATH="$staged/bin/tsgolint"
+
+# ember-content-mapper spawns a bare `node`, and needs >= 22.21.1.
+exec node "$staged/oxlint/dist/cli.js" "$@"
