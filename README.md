@@ -10,18 +10,24 @@ app/components/counter.gts:30:13: error typescript(no-unnecessary-condition): Un
 Line 30 column 13 is `this.isEnabled`, inside `{{#if}}`, inside `<template>`. Nothing in
 the diagnostic refers to generated code.
 
+It is also faster. On Optro's frontend, over 3 million lines, ESLint takes 20 minutes or
+more; oxlint built from these branches, type-aware rules included, lints it in under 80
+seconds, at least 15× faster. This repo is too small to show that: at a couple dozen files,
+startup dominates both tools.
+
 ## Why this needs unreleased builds
 
-Two changes, each on a branch:
+Three changes, each on a branch:
 
-|          | change                                                                                                      | PR                                                                 |
-| -------- | ----------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
-| oxlint   | route files it only knows through a `languageOptions.parser` override to tsgolint, instead of skipping them | [oxc#26236](https://github.com/oxc-project/oxc/pull/26236)         |
-| tsgolint | honor the tsconfig's `contentMappers`, which is how TypeScript 7 hands `.gts` to Glint                      | [tsgolint#1166](https://github.com/oxc-project/tsgolint/pull/1166) |
+|          | change                                                                                                                                    | PR                                                                 |
+| -------- | ----------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| oxlint   | custom JS parsers: `languageOptions.parser`, ESLint-plugin rules on the parser's AST, native rules on a shadow source. By Brian Buchanan. | [oxc#24262](https://github.com/oxc-project/oxc/pull/24262)         |
+| oxlint   | route files it only knows through a `languageOptions.parser` override to tsgolint, instead of skipping them                               | [oxc#26236](https://github.com/oxc-project/oxc/pull/26236)         |
+| tsgolint | honor the tsconfig's `contentMappers`, which is how TypeScript 7 hands `.gts` to Glint                                                    | [tsgolint#1166](https://github.com/oxc-project/tsgolint/pull/1166) |
 
-oxc#26236 builds on [oxc#24262](https://github.com/oxc-project/oxc/pull/24262), which added
-custom JS parser support. The oxc#26236 branch already carries those commits, so checking it
-out is enough.
+oxc#24262 is behind `main` and has conflicts. The oxc#26236 branch carries its commits
+rebased onto current `main`, adapted where upstream changed underneath them, so checking out
+that one branch is enough.
 
 There is nothing to `npm install`. Build both from checkouts. Each needs its own setup first:
 
@@ -70,14 +76,15 @@ overrides: [
 ],
 ```
 
-1. JS-plugin pass. `ember-eslint-parser` parses the file, and bridged ESLint-plugin rules
-   run on that AST. `ember/template-no-let-reference` below is one.
-2. Native pass. oxlint's own Rust rules run against a _shadow source_ derived from that
-   parse, which is why template usage counts. See `greeting.gts`.
-3. Type-aware pass. The override's _presence_ is what makes an extension oxlint does not
-   recognize eligible for tsgolint. The parsed AST is never handed over: tsgolint receives
-   the original path and re-derives the content itself through `contentMappers`, which runs
-   `ember-content-mapper` (wrapping Glint) to produce TypeScript for typescript-go to check.
+1. JS-plugin pass (oxc#24262). `ember-eslint-parser` parses the file, and bridged
+   ESLint-plugin rules run on that AST. `ember/template-no-let-reference` below is one.
+2. Native pass (oxc#24262). oxlint's own Rust rules run against a _shadow source_ derived
+   from that parse, which is why template usage counts. See `greeting.gts`.
+3. Type-aware pass (oxc#26236 and tsgolint#1166). The override's _presence_ is what makes
+   an extension oxlint does not recognize eligible for tsgolint. The parsed AST is never
+   handed over: tsgolint receives the original path and re-derives the content itself
+   through `contentMappers`, which runs `ember-content-mapper` (wrapping Glint) to produce
+   TypeScript for typescript-go to check.
 
 So a `.gts` is parsed twice by two different things: `ember-eslint-parser` for the rules
 that run in-process, `ember-content-mapper` for the type-aware ones.
@@ -218,6 +225,10 @@ it comes from a checked-in `.vscode/settings.json` in a workspace you have not t
 PR is draft and waits on the oxlint server side, so for now a `.gts` opened in an editor
 reports `unsupported-file-extension`.
 
+One thing is unverified even then: the language server sends tsgolint the unsaved buffer
+text rather than letting it read the file from disk, and whether the content mapper runs on
+that text has not been checked.
+
 When it lands, these are the paths to point at a local build:
 
 ```jsonc
@@ -251,9 +262,14 @@ When it lands, these are the paths to point at a local build:
   and is unaffected, so `no-unnecessary-condition` still reports while the ember rules go
   missing. That combination reads like a rule that found nothing.
 
+  Among the bridged rules this config applies to `.gjs`/`.gts`, it is the only one that uses
+  code-path analysis. `n/process-exit-as-throw` does too, but `n` only applies to Node files
+  here, which oxlint parses itself.
+
 - Bridged rules needing type information. The bridge supplies no parser services, and
   tsgolint does not run bridged rules, so there is nowhere for a type-checked ESLint rule to
-  work. Not tested in this repo.
+  work. None of the bridged rules this config applies to `.gjs`/`.gts` need it
+  (`eslint-plugin-n`'s `no-sync` does, and is not enabled).
 - Diagnostics whose fix cannot be expressed in the template. `typescript/dot-notation` is
   the clearest case. Blocks are property accesses in the mapped TypeScript, so enabling the
   rule reports against the component's caller:
@@ -268,10 +284,31 @@ When it lands, these are the paths to point at a local build:
 
 - Linux and CI. Only built and run on darwin-arm64.
 
+## Getting it upstream
+
+None of the oxlint or tsgolint changes are Ember-specific. They add support for any
+`languageOptions.parser` and any TypeScript content mapper; Ember appears only in tests,
+fixtures, test dependencies and comments. That makes them candidates for upstream rather than an Ember fork.
+
+The risk is that the oxc team has its own design for custom languages: the Language Plugins
+RFC ([oxc#21936](https://github.com/oxc-project/oxc/discussions/21936)), tracked in
+[oxc#23207](https://github.com/oxc-project/oxc/issues/23207). There, a language plugin
+returns its own AST plus a transform to virtual TypeScript with Volar-style mappings, and
+oxlint runs its Rust rules and type-aware linting on that transform. oxc#24262 takes
+ESLint's `languageOptions.parser` route instead; its description frames that as the
+compatibility path ESLint keeps next to its own `language` API, scoped so it does not rule
+out the RFC. The type-aware half differs too: it uses TypeScript 7's `contentMappers` inside
+tsgolint, where the RFC plans to type-check the plugin's own transform
+([oxc#23211](https://github.com/oxc-project/oxc/issues/23211) is still a placeholder).
+Maintainers may ask for any of this to be reshaped to fit that design.
+
+Formatting is a separate effort: [oxc#26542](https://github.com/oxc-project/oxc/pull/26542)
+adds `.gjs`/`.gts` support to oxfmt.
+
 ## Prior art
 
-- [`NullVoxPopuli/ember-content-mapper`](https://github.com/NullVoxPopuli/ember-content-mapper):
-  the mapper, and `examples/cli-app`, the same blueprint wired for TypeScript 7
+- [`NullVoxPopuli/ember-content-mapper`](https://github.com/NullVoxPopuli/ember-content-mapper)
+  by Preston Sego: the mapper, and `examples/cli-app`, the same blueprint wired for TypeScript 7
   type-checking with linting deliberately stripped. This repo is that setup plus the
   linting.
 - `apps/oxlint/fixtures/cli/tsgolint_external_parser` in the oxc branch: the four-file
