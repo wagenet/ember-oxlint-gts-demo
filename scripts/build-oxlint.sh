@@ -21,6 +21,17 @@ for dir in "$OXC_DIR" "$TSGOLINT_DIR"; do
   [ -d "$dir" ] || { echo "missing checkout: $dir" >&2; exit 1; }
 done
 
+# Neither build prepares its own checkout. Catch that here, before the builds fail with
+# errors that do not say what is missing. README.md has the setup commands.
+[ -d "$OXC_DIR/node_modules" ] || {
+  echo "oxc checkout has no node_modules: run pnpm install in $OXC_DIR" >&2
+  exit 1
+}
+[ -d "$TSGOLINT_DIR/internal/collections" ] && [ -f "$TSGOLINT_DIR/typescript/tsc/go.mod" ] || {
+  echo "tsgolint checkout is not initialized (submodule, patches, internal/collections): see README.md" >&2
+  exit 1
+}
+
 echo "==> tsgolint ($TSGOLINT_DIR)"
 (cd "$TSGOLINT_DIR" && go build -ldflags="-s -w" -trimpath -o tsgolint ./cmd/tsgolint)
 

@@ -20,23 +20,41 @@ Two changes, each on a branch:
 | tsgolint | honor the tsconfig's `contentMappers`, which is how TypeScript 7 hands `.gts` to Glint                      | [tsgolint#1166](https://github.com/oxc-project/tsgolint/pull/1166) |
 
 oxc#26236 builds on [oxc#24262](https://github.com/oxc-project/oxc/pull/24262), which added
-custom JS parser support, so an oxc checkout needs both.
+custom JS parser support. The oxc#26236 branch already carries those commits, so checking it
+out is enough.
 
-There is nothing to `npm install`. Build both from checkouts:
+There is nothing to `npm install`. Build both from checkouts. Each needs its own setup first:
 
 ```sh
-OXC_DIR=/path/to/oxc TSGOLINT_DIR=/path/to/tsgolint scripts/build-oxlint.sh
+# oxc: the branch from oxc#26236, with its JS dependencies installed
+git clone -b wagenet/oxlint-gts-typeaware https://github.com/wagenet/oxc.git
+(cd oxc && pnpm install)
+
+# tsgolint: the branch from tsgolint#1166, initialized. This is `just init` without the
+# e2e setup, and with --depth 1: the submodule is microsoft/TypeScript, and a full clone
+# takes a long time.
+git clone -b wagenet/tsgolint-content-mappers https://github.com/wagenet/tsgolint.git
+(cd tsgolint && git submodule update --init --depth 1 \
+  && (cd typescript && git am --3way --no-gpg-sign ../patches/*.patch) \
+  && mkdir -p internal/collections \
+  && find typescript/tsc/internal/collections -type f ! -name '*_test.go' -exec cp {} internal/collections/ \;)
+
+# then, in this repo
+OXC_DIR=$PWD/oxc TSGOLINT_DIR=$PWD/tsgolint scripts/build-oxlint.sh
 pnpm install
 pnpm lint:oxlint
 ```
+
+Both this repo and oxc pin pnpm 12 through `packageManager`. An older global pnpm cannot read
+their lockfiles, and pnpm older than 9.7 does not switch versions on its own.
 
 `scripts/build-oxlint.sh` stages the pair into `.oxlint-internal/` (gitignored, ~36MB) and
 writes a `BUILD-INFO` recording which commits went in. `bin/oxlint` sets `OXLINT_TSGOLINT_PATH` and
 runs the staged CLI, and does nothing else. Everything after it is ordinary oxlint. Set `OXLINT_INTERNAL_DIR` to reuse a build staged somewhere else.
 
 Requirements: Node matching `^22.21.1 || >=24.10.0`, which is `ember-content-mapper`'s own
-range and applies because it spawns a bare `node` (23.x does not qualify). Plus Go and Rust
-toolchains for the two builds. Verified on darwin-arm64.
+range and applies because it spawns a bare `node` (23.x does not qualify). Plus Go 1.26 or
+later and Rust toolchains for the two builds. Verified on darwin-arm64.
 
 ## How a `.gts` file gets linted
 
@@ -116,7 +134,7 @@ No files found to lint. Please check your paths and ignore patterns.
 Misspell the mapper package and both halves say so:
 
 ```
-tsconfig.json:30:18: error typescript(tsconfig-error): Invalid tsconfig
+tsconfig.json:20:18: error typescript(tsconfig-error): Invalid tsconfig
   help: The content mapper package 'ember-content-mapper-typo' could not be resolved.
 app/components/counter.gts:1:1: error typescript(unsupported-file-extension): Unsupported file extension
   help: tsgolint cannot type-check .gts files on their own. Register a TypeScript content
